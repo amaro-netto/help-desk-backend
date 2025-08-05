@@ -7,10 +7,10 @@ const router = express.Router();
 // Middleware para verificar se o usuário já está logado
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization'];
-  if (!token) return res.sendStatus(401); // Unauthorized
+  if (!token) return res.sendStatus(401);
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.sendStatus(403); // Forbidden
+  jwt.verify(token.replace('Bearer ', ''), process.env.JWT_SECRET, (err, user) => {
+    if (err) return res.sendStatus(403);
     req.user = user;
     next();
   });
@@ -20,7 +20,6 @@ const authenticateToken = (req, res, next) => {
 router.post('/register', authenticateToken, async (req, res) => {
   const { name, email, password, role } = req.body;
 
-  // Verifica se o usuário logado é um Admin
   if (req.user.role !== 'ADMIN') {
     return res.status(403).send('Acesso negado. Apenas administradores podem registrar novos usuários.');
   }
@@ -28,7 +27,6 @@ router.post('/register', authenticateToken, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
-    // Hash da senha antes de salvar
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const result = await pool.query(
@@ -62,13 +60,36 @@ router.post('/login', async (req, res) => {
       return res.status(400).send('Email ou senha incorretos.');
     }
 
-    // Cria o token JWT com o ID e o papel do usuário
     const token = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (err) {
     console.error(err);
     res.status(500).send('Erro ao fazer login.');
+  }
+});
+
+// Rota TEMPORÁRIA para registrar o primeiro usuário
+// REMOVA esta rota após criar seu primeiro usuário admin
+router.post('/register-temp', async (req, res) => {
+  const { name, email, password, role } = req.body;
+  if (!name || !email || !password || !role) {
+    return res.status(400).send('Todos os campos são obrigatórios.');
+  }
+
+  try {
+    const pool = req.app.locals.pool;
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role',
+      [name, email, hashedPassword, role]
+    );
+
+    res.status(201).json({ message: 'Usuário registrado com sucesso!', user: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Erro ao registrar o usuário.');
   }
 });
 
