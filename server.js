@@ -9,23 +9,20 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Permite acesso de qualquer frontend durante o desenvolvimento
+    origin: "*", 
   }
 });
 
-// Configuração do CORS e JSON Parser
 app.use(express.json());
 app.use(cors());
 
-// Configuração do pool de conexão com o PostgreSQL (Supabase)
 const pool = new Pool({
   connectionString: process.env.SUPABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Para conexões SSL com Supabase
+    rejectUnauthorized: false
   }
 });
 
-// Testar a conexão com o banco de dados
 pool.connect((err, client, release) => {
   if (err) {
     return console.error('Erro ao conectar ao banco de dados', err.stack);
@@ -39,29 +36,35 @@ pool.connect((err, client, release) => {
   });
 });
 
-// Expondo o pool e o io para as rotas
 app.locals.pool = pool;
 app.locals.io = io;
 
-// Configuração do WebSocket
+const connectedUsers = {};
+
 io.on('connection', (socket) => {
   console.log(`Usuário conectado via WebSocket: ${socket.id}`);
   
   socket.on('technician-available', (userId) => {
-    console.log(`Técnico ${userId} está online.`);
-    // Implemente a lógica para rastrear técnicos disponíveis
+    connectedUsers[userId] = socket.id;
+    console.log(`Técnico ${userId} está online. ID do Socket: ${socket.id}`);
   });
 
   socket.on('disconnect', () => {
+    for (const userId in connectedUsers) {
+      if (connectedUsers[userId] === socket.id) {
+        delete connectedUsers[userId];
+        console.log(`Técnico ${userId} está offline.`);
+        break;
+      }
+    }
     console.log(`Usuário desconectado: ${socket.id}`);
   });
 });
 
-// Rotas da aplicação
 const authRoutes = require('./routes/auth');
-const ticketsRoutes = require('./routes/tickets'); // Adicione esta linha
+const ticketsRoutes = require('./routes/tickets'); 
 app.use('/auth', authRoutes);
-app.use('/api', ticketsRoutes); // Adicione esta linha
+app.use('/api', ticketsRoutes); 
 
 app.get('/', (req, res) => {
   res.send('API de Chamados está funcionando!');
