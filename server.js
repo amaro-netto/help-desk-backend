@@ -63,8 +63,10 @@ io.on('connection', (socket) => {
 
 const authRoutes = require('./routes/auth');
 const ticketsRoutes = require('./routes/tickets');
-app.use('/api', ticketsRoutes);
-app.use('/auth', authRoutes);
+
+// Registre as rotas da API com seus prefixos completos
+app.use('/api/tickets', ticketsRoutes); 
+app.use('/api/auth', authRoutes);
 
 app.get('/', (req, res) => {
   res.send('API de Chamados está funcionando!');

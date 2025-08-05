@@ -2,13 +2,8 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { validate: isUuid } = require('uuid'); // Adicione esta linha
 
-router.get('/teste', (req, res) => {
-  res.send('Rota tickets.js funcionando!');
-});
-
-// Middleware para verificar se o usuário já está logado
+// Middleware para verificar o token JWT e obter as informações do usuário
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.sendStatus(401);
@@ -67,11 +62,6 @@ router.get('/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const pool = req.app.locals.pool;
 
-  // Validação de UUID
-  if (!isUuid(id)) {
-    return res.status(400).send('ID inválido.');
-  }
-
   try {
     const result = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
     if (result.rows.length === 0) {
@@ -89,11 +79,6 @@ router.post('/:id/accept', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { userId } = req.user;
   const pool = req.app.locals.pool;
-
-  // Validação de UUID
-  if (!isUuid(id)) {
-    return res.status(400).send('ID inválido.');
-  }
 
   try {
     const result = await pool.query(
@@ -117,11 +102,6 @@ router.put('/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   const pool = req.app.locals.pool;
-
-  // Validação de UUID
-  if (!isUuid(id)) {
-    return res.status(400).send('ID inválido.');
-  }
 
   try {
     const ticketResult = await pool.query('SELECT assigned_to FROM tickets WHERE id = $1', [id]);
