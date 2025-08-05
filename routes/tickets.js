@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 
-// Middleware para verificar o token JWT e obter as informações do usuário
+// Middleware de autenticação
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.sendStatus(401);
@@ -14,131 +14,88 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Middleware para verificar se o usuário é Técnico ou Admin
-const checkTechnicianOrAdmin = (req, res, next) => {
-  if (req.user.role !== 'TECHNICIAN' && req.user.role !== 'ADMIN') {
-    return res.status(403).send('Acesso negado. Apenas técnicos ou administradores.');
-  }
-  next();
-};
-
-// Middleware para verificar se o usuário é Admin
-const checkAdmin = (req, res, next) => {
-  if (req.user.role !== 'ADMIN') {
-    return res.status(403).send('Acesso negado. Apenas administradores.');
-  }
-  next();
-};
-
-// Rota para criar um novo chamado
-router.post('/tickets', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, async (req, res) => {
   const { title, description, type, priority } = req.body;
-  const createdBy = req.user.userId;
+  const created_by = req.user.userId;
+  const pool = req.app.locals.pool;
 
   try {
-    const pool = req.app.locals.pool;
     const result = await pool.query(
       'INSERT INTO tickets (title, description, type, priority, status, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [title, description, type, priority, 'OPEN', createdBy]
+      [title, description, type, priority, 'OPEN', created_by]
     );
 
-    const newTicket = result.rows[0];
-    const io = req.app.locals.io;
-    io.emit('new-ticket-alert', newTicket);
+    // Notifica os técnicos e administradores via WebSocket
+    req.app.locals.io.emit('new-ticket-alert', result.rows[0]);
 
-    res.status(201).json({ message: 'Chamado criado com sucesso!', ticket: newTicket });
+    res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).send('Erro ao criar o chamado.');
+    res.status(500).send('Erro ao criar chamado.');
   }
 });
 
-// Rota para um técnico aceitar um chamado
-router.post('/tickets/:id/accept', authenticateToken, checkTechnicianOrAdmin, async (req, res) => {
-  const { id } = req.params;
-  const technicianId = req.user.userId;
+// Rota para buscar todos os tickets
+router.get('/', authenticateToken, async (req, res) => {
+  const pool = req.app.locals.pool;
+  const { role, userId } = req.user;
 
   try {
-    const pool = req.app.locals.pool;
-    const result = await pool.query(
-      'UPDATE tickets SET assigned_to = $1, status = $2 WHERE id = $3 AND assigned_to IS NULL RETURNING *',
-      [technicianId, 'IN_PROGRESS', id]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(400).send('O chamado não pode ser aceito. Já foi atribuído ou não existe.');
-    }
-
-    const acceptedTicket = result.rows[0];
-    const io = req.app.locals.io;
-    io.emit('ticket-accepted', acceptedTicket);
-
-    res.json({ message: 'Chamado aceito com sucesso!', ticket: acceptedTicket });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Erro ao aceitar o chamado.');
-  }
-});
-
-
-// Rota para listar chamados
-router.get('/tickets', authenticateToken, async (req, res) => {
-  try {
-    const pool = req.app.locals.pool;
     let query;
-    let params;
+    let params = [];
 
-    if (req.user.role === 'ADMIN') {
-      query = 'SELECT * FROM tickets ORDER BY created_at DESC';
-      params = [];
-    } else if (req.user.role === 'TECHNICIAN') {
-      query = 'SELECT * FROM tickets WHERE status IN (\'OPEN\', \'IN_PROGRESS\') OR assigned_to = $1 ORDER BY created_at DESC';
-      params = [req.user.userId];
-    } else { // USER
+    if (role === 'USER') {
       query = 'SELECT * FROM tickets WHERE created_by = $1 ORDER BY created_at DESC';
-      params = [req.user.userId];
+      params = [userId];
+    } else {
+      query = 'SELECT * FROM tickets ORDER BY created_at DESC';
     }
 
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).send('Erro ao listar os chamados.');
+    res.status(500).send('Erro ao buscar chamados.');
   }
 });
 
-// Rota para atualizar um chamado (exclusivo para técnicos e admins)
-router.put('/tickets/:id', authenticateToken, checkTechnicianOrAdmin, async (req, res) => {
+// ** Rota para buscar um único chamado por ID **
+router.get('/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { status, assigned_to } = req.body;
+  const pool = req.app.locals.pool;
 
   try {
-    const pool = req.app.locals.pool;
-
-    let updateQuery = 'UPDATE tickets SET status = $1, assigned_to = $2 WHERE id = $3 RETURNING *';
-    let params = [status, assigned_to, id];
-
-    if (status === 'RESOLVED' || status === 'CLOSED') {
-      updateQuery = 'UPDATE tickets SET status = $1, assigned_to = $2, closed_at = NOW() WHERE id = $3 RETURNING *';
-      
-      const ticket = await pool.query('SELECT assigned_to FROM tickets WHERE id = $1', [id]);
-      const technicianId = ticket.rows[0].assigned_to;
-
-      if (technicianId) {
-        await pool.query('UPDATE users SET points = points + 10 WHERE id = $1', [technicianId]);
-      }
-    }
-    
-    const result = await pool.query(updateQuery, params);
-
-    if (result.rowCount === 0) {
+    const result = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
       return res.status(404).send('Chamado não encontrado.');
     }
-
-    res.json({ message: 'Chamado atualizado com sucesso!', ticket: result.rows[0] });
+    res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).send('Erro ao atualizar o chamado.');
+    res.status(500).send('Erro ao buscar chamado.');
+  }
+});
+
+// Rota para aceitar um chamado
+router.post('/:id/accept', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { userId } = req.user;
+  const pool = req.app.locals.pool;
+
+  try {
+    const result = await pool.query(
+      'UPDATE tickets SET status = $1, assigned_to = $2 WHERE id = $3 AND status = $4 RETURNING *',
+      ['IN_PROGRESS', userId, id, 'OPEN']
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).send('Chamado não pôde ser aceito. Verifique o status.');
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Erro ao aceitar chamado.');
   }
 });
 
