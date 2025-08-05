@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 
-// Middleware de autenticação
+// Middleware para verificar o token JWT e obter as informações do usuário
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.sendStatus(401);
@@ -14,7 +14,8 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-router.post('/', authenticateToken, async (req, res) => {
+// Rota para criar um novo chamado
+router.post('/tickets', authenticateToken, async (req, res) => {
   const { title, description, type, priority } = req.body;
   const created_by = req.user.userId;
   const pool = req.app.locals.pool;
@@ -25,7 +26,6 @@ router.post('/', authenticateToken, async (req, res) => {
       [title, description, type, priority, 'OPEN', created_by]
     );
 
-    // Notifica os técnicos e administradores via WebSocket
     req.app.locals.io.emit('new-ticket-alert', result.rows[0]);
 
     res.status(201).json(result.rows[0]);
@@ -36,7 +36,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Rota para buscar todos os tickets
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/tickets', authenticateToken, async (req, res) => {
   const pool = req.app.locals.pool;
   const { role, userId } = req.user;
 
@@ -49,6 +49,7 @@ router.get('/', authenticateToken, async (req, res) => {
       params = [userId];
     } else {
       query = 'SELECT * FROM tickets ORDER BY created_at DESC';
+      params = []; // Garante que não há parâmetros para a query
     }
 
     const result = await pool.query(query, params);
@@ -59,8 +60,8 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// ** Rota para buscar um único chamado por ID **
-router.get('/:id', authenticateToken, async (req, res) => {
+// Rota para buscar um único chamado por ID
+router.get('/tickets/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const pool = req.app.locals.pool;
 
@@ -77,7 +78,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Rota para aceitar um chamado
-router.post('/:id/accept', authenticateToken, async (req, res) => {
+router.post('/tickets/:id/accept', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { userId } = req.user;
   const pool = req.app.locals.pool;
