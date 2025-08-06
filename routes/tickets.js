@@ -1,8 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const { validate: isUuid } = require('uuid'); // Adicione esta linha
 
-// Middleware para verificar o token JWT e obter as informações do usuário
+router.get('/teste', (req, res) => {
+  res.send('Rota tickets.js funcionando!');
+});
+
+// Middleware para verificar se o usuário já está logado
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization'];
   if (!token) return res.sendStatus(401);
@@ -15,7 +21,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Rota para criar um novo chamado
-router.post('/tickets', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, async (req, res) => {
   const { title, description, type, priority } = req.body;
   const created_by = req.user.userId;
   const pool = req.app.locals.pool;
@@ -36,23 +42,19 @@ router.post('/tickets', authenticateToken, async (req, res) => {
 });
 
 // Rota para buscar todos os tickets
-router.get('/tickets', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   const pool = req.app.locals.pool;
   const { role, userId } = req.user;
 
   try {
-    let query;
-    let params = [];
+    let result;
 
     if (role === 'USER') {
-      query = 'SELECT * FROM tickets WHERE created_by = $1 ORDER BY created_at DESC';
-      params = [userId];
+      result = await pool.query('SELECT * FROM tickets WHERE created_by = $1 ORDER BY created_at DESC', [userId]);
     } else {
-      query = 'SELECT * FROM tickets ORDER BY created_at DESC';
-      params = []; // Garante que não há parâmetros para a query
+      result = await pool.query('SELECT * FROM tickets ORDER BY created_at DESC');
     }
 
-    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -61,9 +63,14 @@ router.get('/tickets', authenticateToken, async (req, res) => {
 });
 
 // Rota para buscar um único chamado por ID
-router.get('/tickets/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const pool = req.app.locals.pool;
+
+  // Validação de UUID
+  if (!isUuid(id)) {
+    return res.status(400).send('ID inválido.');
+  }
 
   try {
     const result = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
@@ -78,10 +85,15 @@ router.get('/tickets/:id', authenticateToken, async (req, res) => {
 });
 
 // Rota para aceitar um chamado
-router.post('/tickets/:id/accept', authenticateToken, async (req, res) => {
+router.post('/:id/accept', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { userId } = req.user;
   const pool = req.app.locals.pool;
+
+  // Validação de UUID
+  if (!isUuid(id)) {
+    return res.status(400).send('ID inválido.');
+  }
 
   try {
     const result = await pool.query(
@@ -97,6 +109,44 @@ router.post('/tickets/:id/accept', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).send('Erro ao aceitar chamado.');
+  }
+});
+
+// Rota para atualizar um chamado e aplicar gamificação
+router.put('/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  const pool = req.app.locals.pool;
+
+  // Validação de UUID
+  if (!isUuid(id)) {
+    return res.status(400).send('ID inválido.');
+  }
+
+  try {
+    const ticketResult = await pool.query('SELECT assigned_to FROM tickets WHERE id = $1', [id]);
+    const assignedToId = ticketResult.rows[0]?.assigned_to;
+
+    let updateQuery = 'UPDATE tickets SET status = $1 WHERE id = $2 RETURNING *';
+    let params = [status, id];
+
+    if (status === 'RESOLVED' || status === 'CLOSED') {
+      updateQuery = 'UPDATE tickets SET status = $1, closed_at = NOW() WHERE id = $2 RETURNING *';
+      if (assignedToId) {
+        await pool.query('UPDATE users SET points = points + 10 WHERE id = $1', [assignedToId]);
+      }
+    }
+    
+    const result = await pool.query(updateQuery, params);
+
+    if (result.rowCount === 0) {
+      return res.status(404).send('Chamado não encontrado.');
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Erro ao atualizar o chamado.');
   }
 });
 

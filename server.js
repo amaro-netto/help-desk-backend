@@ -62,9 +62,9 @@ io.on('connection', (socket) => {
 });
 
 const authRoutes = require('./routes/auth');
-const ticketsRoutes = require('./routes/tickets'); 
+const ticketsRoutes = require('./routes/tickets');
+app.use('/api', ticketsRoutes);
 app.use('/auth', authRoutes);
-app.use('/api', ticketsRoutes); 
 
 app.get('/', (req, res) => {
   res.send('API de Chamados está funcionando!');
