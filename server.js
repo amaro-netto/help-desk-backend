@@ -7,14 +7,32 @@ const { Pool } = require('pg');
 
 const app = express();
 const server = http.createServer(app);
+
+// --- Início da Configuração do Socket.io e CORS ---
+
 const io = new Server(server, {
   cors: {
-    origin: "*", 
+    origin: "*", // Mantém a configuração para o WebSocket, se necessário
   }
 });
 
-app.use(express.json());
-app.use(cors());
+// CORREÇÃO 1: Definir as opções de CORS corretamente
+const corsOptions = {
+  // ATENÇÃO: Substitua pela URL do seu frontend na Vercel!
+  // Este deve ser o endereço que você usa no navegador para ver seu site.
+  origin: 'https://amaronetto-helpdesk.vercel.app/', 
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+};
+
+// CORREÇÃO 2: Aplicar os middlewares na ordem correta e sem duplicação
+app.use(cors(corsOptions)); // Usa as opções de CORS para todas as rotas HTTP
+app.options('*', cors(corsOptions)); // Habilita a resposta para requisições preflight (OPTIONS)
+
+app.use(express.json()); // Habilita o parsing de JSON no corpo das requisições (apenas uma vez)
+
+// --- Fim da Configuração ---
 
 const pool = new Pool({
   connectionString: process.env.SUPABASE_URL,
